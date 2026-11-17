@@ -42,8 +42,8 @@ BASE_DIR = Path(__file__).resolve().parent
 TAGS_FILE = BASE_DIR / "data" / "selector_tags.txt"
 CACHE_FILE = BASE_DIR / "data" / "selector_cache.json"
 LOCK_FILE = BASE_DIR / "data" / "selector.lock"
-RANKING_FILE = BASE_DIR / "data" / "group_ranking.txt"          # +++ ranking
-SUPER_TAGS_FILE = BASE_DIR / "data" / "super_selector_tags.txt"  # +++ super
+RANKING_FILE = BASE_DIR / "data" / "group_ranking.txt"
+SUPER_TAGS_FILE = BASE_DIR / "data" / "super_selector_tags.txt"
 
 PASSES = 2                    # delay-test passes per group
 PASS_INTERVAL = 9.0           # seconds between pass starts
@@ -70,14 +70,10 @@ CACHE_TTL = 3 * 24 * 3600     # drop groups/members unseen for this long (second
 
 TABLE_ROWS = 6                # members shown per group in the report
 
-
-# --------------------------------- logging ---------------------------------
 USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
-
 
 def _paint(code, text):
     return f"\033[{code}m{text}\033[0m" if USE_COLOR else text
-
 
 def green(t): return _paint("32;1", t)
 def red(t): return _paint("31", t)
@@ -85,17 +81,13 @@ def yellow(t): return _paint("33", t)
 def dim(t): return _paint("2", t)
 def bold(t): return _paint("1", t)
 
-
 def log(msg="", indent=0):
     print(f"{datetime.now():%H:%M:%S} {'  ' * indent}{msg}", flush=True)
-
 
 def row(msg=""):
     print(" " * 9 + msg, flush=True)
 
-
 UUID_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
-
 
 def short(name):
     m = UUID_RE.search(name)
@@ -103,11 +95,8 @@ def short(name):
         return m.group()[:8]
     return name if len(name) <= 16 else name[:15] + "…"
 
-
-# ------------------------------- sbcli I/O --------------------------------
 class SbcliError(RuntimeError):
     pass
-
 
 def sbcli(*args, timeout=30.0, parse=True):
     args = [str(a) for a in args]
@@ -129,11 +118,9 @@ def sbcli(*args, timeout=30.0, parse=True):
         raise SbcliError(f"{label}: unexpected response")
     return data
 
-
 def get_group(tag):
     info = sbcli("-g", tag)
     return info.get("now"), [m for m in (info.get("all") or []) if isinstance(m, str)]
-
 
 def probe_group(tag):
     """Return {member: delay_ms} for members that answered (others are absent).
@@ -154,18 +141,14 @@ def probe_group(tag):
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
     }
 
-
 def select(tag, name):
     sbcli("-s", tag, name, parse=False)
 
-
-# --------------------------------- cache ----------------------------------
 def clean_samples(raw):
     if not isinstance(raw, list):
         return []
     out = [int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None for x in raw]
     return out[-CACHE_MAX_SAMPLES:]
-
 
 def load_cache():
     try:
@@ -173,7 +156,6 @@ def load_cache():
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
-
 
 def save_cache(cache):
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -187,10 +169,7 @@ def save_cache(cache):
             os.unlink(tmp)
         raise
 
-
-# +++ ranking
 def save_ranking(ranking):
-    """ranking: list of (tag, score). Writes tags best-to-worst, one per line."""
     RANKING_FILE.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=RANKING_FILE.parent, suffix=".tmp")
     try:
@@ -202,12 +181,8 @@ def save_ranking(ranking):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
-# --- ranking
 
-
-# +++ super
 def read_super_tags():
-    """Read super-selector tags (one per line, '#' comments, dedup). Empty if file missing."""
     try:
         lines = SUPER_TAGS_FILE.read_text().splitlines()
     except OSError:
@@ -220,12 +195,7 @@ def read_super_tags():
             tags.append(tag)
     return tags
 
-
 def apply_super_ranking(ranking):
-    """Assign groups to super-selectors in ranking order (best -> worst), wrapping.
-
-    Super-selector #i gets ranking[i % len(ranking)]. Returns the number of errors.
-    """
     supers = read_super_tags()
     if not supers:
         log(yellow("super: no super-selector tags, skipped"))
@@ -247,11 +217,8 @@ def apply_super_ranking(ranking):
             log(f"{short(super_tag):<9} {red('✗ ' + str(exc))}", 1)
             errors += 1
     return errors
-# --- super
-
 
 def prune_cache(cache, tags):
-    """Drop groups no longer listed, expired or malformed. Returns removed count."""
     now, removed = time.time(), 0
     for tag in list(cache):
         e = cache[tag]
@@ -266,9 +233,7 @@ def prune_cache(cache, tags):
             removed += 1
     return removed
 
-
 def prune_members(entry, members):
-    """Drop members that left the group, expired or are malformed. Returns removed count."""
     now, removed, alive = time.time(), 0, set(members)
     for name in list(entry["m"]):
         m = entry["m"][name]
@@ -277,18 +242,13 @@ def prune_members(entry, members):
             removed += 1
     return removed
 
-
 def history(entry, name):
-    """Recent cached samples of a member (empty if missing or too old)."""
     m = entry["m"].get(name)
     if not m or time.time() - float(m.get("t", 0) or 0) > HISTORY_MAX_AGE:
         return []
     return clean_samples(m.get("s"))
 
-
-# -------------------------------- scoring ---------------------------------
 def analyze(samples):
-    """samples: list of (delay_or_None, weight). Returns stats dict or None if no success."""
     total_w = sum(w for _, w in samples)
     oks = [(d, w) for d, w in samples if d is not None]
     if not oks or total_w <= 0:
@@ -307,7 +267,6 @@ def analyze(samples):
         "score": base * (1 + FAIL_PENALTY * (1 - ratio)),
     }
 
-
 def fail_reason(s):
     if s["ratio"] < MIN_SUCCESS_RATIO:
         return f"ok {s['ratio']:.0%} < {MIN_SUCCESS_RATIO:.0%}"
@@ -317,13 +276,10 @@ def fail_reason(s):
         return f"p90 > {MAX_P90_MS}ms"
     return ""
 
-
 def limit(best, rel, abs_ms):
     return max(best * (1 + rel), best + abs_ms)
 
-
 def choose(stats, current):
-    """stats: {name: analyze() result + extras}. Returns (pick, reason, relaxed)."""
     strict = [n for n, s in stats.items() if not fail_reason(s)]
     relaxed = not strict
     if strict:
@@ -352,8 +308,6 @@ def choose(stats, current):
     how = "best score" if len(near) == 1 else f"random among {len(near)} near-best (<= {near_limit:.0f}), weight 1/score"
     return pick, f"{why}; {how}", relaxed
 
-
-# --------------------------------- report ---------------------------------
 def print_table(stats, total, current, pick):
     ordered = sorted(stats, key=lambda n: (bool(fail_reason(stats[n])), stats[n]["score"]))
     want = set(ordered[:TABLE_ROWS]) | {pick, current}
@@ -378,8 +332,6 @@ def print_table(stats, total, current, pick):
     if tail:
         row(dim("   " + ", ".join(tail)))
 
-
-# ---------------------------------- main ----------------------------------
 def read_tags():
     try:
         lines = TAGS_FILE.read_text().splitlines()
@@ -393,7 +345,6 @@ def read_tags():
             tags.append(tag)
     return tags
 
-
 def acquire_lock():
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     fh = open(LOCK_FILE, "w")
@@ -403,7 +354,6 @@ def acquire_lock():
         except OSError:
             sys.exit("another instance is already running")
     return fh
-
 
 def run():
     started = time.monotonic()
@@ -521,7 +471,6 @@ def run():
                 summary.append((label, "ERROR", short(pick), med))
                 errors += 1
 
-    # +++ ranking: sort groups best -> worst and persist
     ranking.sort(key=lambda kv: kv[1])
     if ranking:
         log(bold("Group ranking (best → worst)"))
@@ -534,14 +483,11 @@ def run():
             errors += 1
     else:
         log(yellow("no ranked groups (nobody answered)"))
-    # --- ranking
-
-    # +++ super: apply ranking to super-selectors (APPLY only)
+    
     if APPLY:
         errors += apply_super_ranking(ranking)
     else:
         log(yellow("super: dry-run, ranking not applied to super-selectors"))
-    # --- super
 
     try:
         save_cache(cache)
@@ -557,7 +503,6 @@ def run():
     log(f"done in {time.monotonic() - started:.0f}s, errors: {errors}")
     return 1 if errors else 0
 
-
 def main():
     lock = acquire_lock()  # keep a reference for the process lifetime
     try:
@@ -568,7 +513,6 @@ def main():
     finally:
         lock.close()
     sys.exit(code)
-
 
 if __name__ == "__main__":
     main()
