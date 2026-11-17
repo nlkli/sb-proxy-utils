@@ -11,17 +11,19 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
-UPDATE_LOOP_TIMEOUT = 90 # sec
 FILE = "sync-time.json"
 CONFIG_UPDATE_TIMEOUT = 60 * 60 * 12   # seconds
 SELECT_TIMEOUT = 60 * 11          # seconds
+BRIDGE_SELECT_TIMEOUT = 60 * 60 * 3          # seconds
 
 CONFIG_UPDATE_CMD = "sudo ./update-config.py && ./write-config.sh && ./restart-sb.sh"
 SELECT_CMD = "./best-selector.py"
+BRIDGE_SELECT_CMD = "./tor-bridge-select.py"
 
 DEFAULTS = {
     "last_config_update": datetime.now(timezone.utc).isoformat(),
     "last_select": datetime.now(timezone.utc).isoformat(),
+    "last_bridge_select": datetime.now(timezone.utc).isoformat(),
 }
 
 def load():
@@ -33,15 +35,18 @@ def load():
     with open(FILE) as f:
         return json.load(f), True
 
+
 def save(data):
     with open(FILE, "w") as f:
         json.dump(data, f, indent=2)
+
 
 def elapsed(iso_ts):
     then = datetime.fromisoformat(iso_ts)
     if then.tzinfo is None:
         then = then.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - then).total_seconds()
+
 
 def run(cmd):
     logging.info("Running: %s", cmd)
@@ -54,6 +59,7 @@ def run(cmd):
     except Exception as e:
         logging.error("Unexpected error running '%s': %s", cmd, e)
     return False
+
 
 def run_once():
     try:
@@ -75,14 +81,22 @@ def run_once():
             else:
                 logging.warning("Select failed, timestamp not updated")
 
+        if not exists or elapsed(data["last_bridge_select"]) > BRIDGE_SELECT_TIMEOUT:
+            if run(BRIDGE_SELECT_CMD):
+                data["last_bridge_select"] = datetime.now(timezone.utc).isoformat()
+            else:
+                logging.warning("Select failed, timestamp not updated")
+
         save(data)
     except Exception as e:
         logging.error("Unexpected error: %s", e)
 
 def main():
     while True:
+        # Your original single-run logic
         run_once()
-        time.sleep(UPDATE_LOOP_TIMEOUT)
+        time.sleep(120)
 
 if __name__ == "__main__":
     main()
+
